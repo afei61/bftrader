@@ -10,6 +10,11 @@ class MainWindow;
 }
 
 class Profile;
+class ContractForm;
+class StatForm;
+class InfoForm;
+class ErrorForm;
+class DebugForm;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -21,7 +26,6 @@ public:
     void shutdown();
 
 public slots:
-    void onLog(QString when, QString msg);
 
 private slots:
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
@@ -38,8 +42,7 @@ private slots:
     void on_actionCrashTerminateProcess_triggered();
     void on_actionNetStart_triggered();
     void on_actionNetStop_triggered();
-    void on_actionDbBrowser_triggered();
-    void on_actionDbStat_triggered();
+    void on_actionDbCompact_triggered();
 
 private:
     void closeEvent(QCloseEvent* event) override;
@@ -60,7 +63,12 @@ private:
     QMenu* trayIconMenu;
     QIcon icon_;
 
-    QStringList table_col_;
+    // tabs
+    ContractForm* contractForm_;
+    StatForm* statForm_;
+    InfoForm* infoForm_;
+    ErrorForm* errorForm_;
+    DebugForm* debugForm_;
 };
 
 #endif // MAINWINDOW_H

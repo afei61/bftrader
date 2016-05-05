@@ -1,12 +1,17 @@
 #include "mainwindow.h"
 #include "contractform.h"
 #include "debug_utils.h"
+#include "debugform.h"
+#include "errorform.h"
+#include "infoform.h"
 #include "logger.h"
 #include "profile.h"
 #include "rpcservice.h"
 #include "servicemgr.h"
+#include "statform.h"
 #include "tablewidget_helper.h"
 #include "ui_mainwindow.h"
+
 #include <windows.h>
 
 MainWindow::MainWindow(QWidget* parent)
@@ -27,16 +32,18 @@ MainWindow::MainWindow(QWidget* parent)
     ui->actionNetStart->setEnabled(true);
     ui->actionNetStop->setEnabled(false);
 
-    //设置列=
-    table_col_ << "when"
-               << "message";
-    this->ui->tableWidget->setColumnCount(table_col_.length());
-    for (int i = 0; i < table_col_.length(); i++) {
-        ui->tableWidget->setHorizontalHeaderItem(i, new QTableWidgetItem(table_col_.at(i)));
-    }
+    // tabs
+    infoForm_ = new InfoForm(this);
+    errorForm_ = new ErrorForm(this);
+    debugForm_ = new DebugForm(this);
+    contractForm_ = new ContractForm(this);
+    statForm_ = new StatForm(this);
 
-    // 调整参数=
-    bfAdjustTableWidget(ui->tableWidget);
+    ui->tabWidgetData->addTab(statForm_, "data");
+    ui->tabWidgetData->addTab(contractForm_, "contract");
+    ui->tabWidgetLog->addTab(infoForm_, "info");
+    ui->tabWidgetLog->addTab(errorForm_, "error");
+    ui->tabWidgetLog->addTab(debugForm_, "debug");
 }
 
 MainWindow::~MainWindow()
@@ -46,30 +53,20 @@ MainWindow::~MainWindow()
 
 void MainWindow::init()
 {
-    // logger
-    QObject::connect(g_sm->logger(), &Logger::gotError, this, &MainWindow::onLog);
-    QObject::connect(g_sm->logger(), &Logger::gotInfo, this, &MainWindow::onLog);
-    QObject::connect(g_sm->logger(), &Logger::gotDebug, this, &MainWindow::onLog);
+    infoForm_->init();
+    errorForm_->init();
+    debugForm_->init();
+    contractForm_->init();
+    statForm_->init();
 }
 
 void MainWindow::shutdown()
 {
-}
-
-void MainWindow::onLog(QString when, QString msg)
-{
-    int row = ui->tableWidget->rowCount();
-    ui->tableWidget->insertRow(row);
-
-    QTableWidgetItem* item = nullptr;
-
-    item = new QTableWidgetItem(when);
-    ui->tableWidget->setItem(row, 0, item);
-
-    item = new QTableWidgetItem(msg);
-    ui->tableWidget->setItem(row, 1, item);
-
-    ui->tableWidget->scrollToBottom();
+    infoForm_->shutdown();
+    errorForm_->shutdown();
+    debugForm_->shutdown();
+    contractForm_->shutdown();
+    statForm_->shutdown();
 }
 
 void MainWindow::on_actionAppVersion_triggered()
@@ -211,15 +208,7 @@ void MainWindow::on_actionNetStop_triggered()
     QMetaObject::invokeMethod(g_sm->rpcService(), "stop", Qt::QueuedConnection);
 }
 
-void MainWindow::on_actionDbBrowser_triggered()
+void MainWindow::on_actionDbCompact_triggered()
 {
-    ContractForm* form = new ContractForm();
-    form->setWindowFlags(Qt::Window);
-    form->init();
-    centerWindow(form);
-    form->show();
-}
-
-void MainWindow::on_actionDbStat_triggered()
-{
+    //垃圾回收=
 }

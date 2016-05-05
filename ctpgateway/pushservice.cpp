@@ -1,6 +1,6 @@
 #include "pushservice.h"
 #include "bfproxy.grpc.pb.h"
-#include "ctp_utils.h"
+#include "ctputils.h"
 #include "logger.h"
 #include "servicemgr.h"
 #include <QThread>
@@ -16,10 +16,11 @@ using namespace bftrader::bfproxy;
 
 class IGrpcCb {
 public:
-    explicit IGrpcCb()
+    explicit IGrpcCb(QString clientId)
     {
         std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
         context_.set_deadline(deadline);
+        context_.AddMetadata("clientid", clientId.toStdString());
     }
     virtual ~IGrpcCb()
     {
@@ -40,8 +41,8 @@ protected:
 template <class Resp>
 class GrpcCb : public IGrpcCb {
 public:
-    explicit GrpcCb()
-        : IGrpcCb()
+    explicit GrpcCb(QString clientId)
+        : IGrpcCb(clientId)
     {
     }
     virtual ~GrpcCb() override {}
@@ -70,9 +71,9 @@ private:
 class ProxyClient;
 class PingCb final : public GrpcCb<BfPingData> {
 public:
-    explicit PingCb(ProxyClient* proxyClient)
-        : GrpcCb<BfPingData>()
-        , proxyClient_(proxyClient)
+    explicit PingCb(ProxyClient* client, QString clientId)
+        : GrpcCb<BfPingData>(clientId)
+        , client_(client)
     {
     }
     virtual ~PingCb() override {}
@@ -81,14 +82,14 @@ public:
     virtual void operator()() override;
 
 private:
-    ProxyClient* proxyClient_ = nullptr;
+    ProxyClient* client_ = nullptr;
 };
 
 class ProxyClient {
 public:
-    ProxyClient(std::shared_ptr<grpc::Channel> channel, QString clientId, const BfConnectReq& req)
+    ProxyClient(std::shared_ptr<grpc::Channel> channel, QString gatewayId, const BfConnectReq& req)
         : stub_(BfProxyService::NewStub(channel))
-        , clientId_(clientId)
+        , gatewayId_(gatewayId)
         , req_(req)
     {
         BfDebug(__FUNCTION__);
@@ -124,189 +125,64 @@ public:
 
     void OnTradeWillBegin(const BfVoid& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnTradeWillBegin(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnTradeWillBegin fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnTradeWillBegin(&pCb->context(), data, &cq_));
     }
 
     void OnGotContracts(const BfVoid& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnGotContracts(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnGotContracts fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnGotContracts(&pCb->context(), data, &cq_));
     }
 
     // ref: grpc\test\cpp\interop\interop_client.cc
     void OnPing(const BfPingData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfPingData reply;
-        grpc::Status status = stub_->OnPing(&ctx, data, &reply);
-        if (!status.ok()) {
-            incPingFailCount();;
-            BfError("(%s)->OnPing(%dms) fail(%d),code:%d,msg:%s",qPrintable(clientId_),deadline_, pingFailCount(), status.error_code(), status.error_message().c_str());
-            if (pingFailCount() > 3) {
-                BfError("(%s)->OnPing fail too mang times,so kill it", qPrintable(clientId_));
-                QMetaObject::invokeMethod(g_sm->pushService(), "onProxyClose", Qt::QueuedConnection, Q_ARG(QString, clientId_));
-            }
-            return;
-        }
-        resetPingFailCount();
-        */
-
-        auto pCb = new PingCb(this);
+        auto pCb = new PingCb(this, this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnPing(&pCb->context(), data, &cq_));
     }
 
     void OnTick(const BfTickData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnTick(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnTick fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnTick(&pCb->context(), data, &cq_));
     }
 
     // 这个函数就别log了，会重入=
     void OnError(const BfErrorData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnError(&ctx, data, &reply);
-        if (!status.ok()) {
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnError(&pCb->context(), data, &cq_));
     }
 
     // 这个函数就别log了，会重入=
     void OnLog(const BfLogData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnLog(&ctx, data, &reply);
-        if (!status.ok()) {
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnLog(&pCb->context(), data, &cq_));
     }
 
     void OnTrade(const BfTradeData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnTrade(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnTrade fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnTrade(&pCb->context(), data, &cq_));
     }
 
     void OnOrder(const BfOrderData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnOrder(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnOrder fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnOrder(&pCb->context(), data, &cq_));
     }
 
     void OnPosition(const BfPositionData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnPosition(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnPosition fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnPosition(&pCb->context(), data, &cq_));
     }
 
     void OnAccount(const BfAccountData& data)
     {
-        /*
-        grpc::ClientContext ctx;
-        std::chrono::system_clock::time_point deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_);
-        ctx.set_deadline(deadline);
-
-        BfVoid reply;
-        grpc::Status status = stub_->OnAccount(&ctx, data, &reply);
-        if (!status.ok()) {
-            BfError("(%s)->OnAccount fail,code:%d,msg:%s", qPrintable(clientId_), status.error_code(), status.error_message().c_str());
-            return;
-        }
-        */
-        auto pCb = new GrpcCb<BfVoid>();
+        auto pCb = new GrpcCb<BfVoid>(this->gatewayId());
         pCb->setRpcPtrAndFinish(stub_->AsyncOnAccount(&pCb->context(), data, &cq_));
     }
 
@@ -327,13 +203,14 @@ public:
     void incPingFailCount() { pingfail_count_++; }
     int pingFailCount() { return pingfail_count_; }
     void resetPingFailCount() { pingfail_count_ = 0; }
-    QString clientId() { return clientId_; }
+    QString gatewayId() { return gatewayId_; }
+    QString proxyId() { return req_.clientid().c_str(); }
 
 private:
     std::unique_ptr<BfProxyService::Stub> stub_;
     std::atomic_int32_t pingfail_count_ = 0;
     const int deadline_ = 500;
-    QString clientId_;
+    QString gatewayId_;
     BfConnectReq req_;
 
     // async client
@@ -344,19 +221,19 @@ private:
 void PingCb::operator()()
 {
     if (!status_.ok()) {
-        QString clientId = proxyClient_->clientId();
-        proxyClient_->incPingFailCount();
-        int failCount = proxyClient_->pingFailCount();
+        QString proxyId = client_->proxyId();
+        client_->incPingFailCount();
+        int failCount = client_->pingFailCount();
         int errorCode = status_.error_code();
         std::string errorMsg = status_.error_message();
-        BfError("(%s)->OnPing(%dms) fail(%d),code:%d,msg:%s", qPrintable(clientId), deadline_, failCount, errorCode, errorMsg.c_str());
-        if (failCount > 3) {
-            BfError("(%s)->OnPing fail too mang times,so kill it", qPrintable(clientId));
-            QMetaObject::invokeMethod(g_sm->pushService(), "onProxyClose", Qt::QueuedConnection, Q_ARG(QString, clientId));
-        }
+        BfError("(%s)->OnPing(%dms) fail(%d),code:%d,msg:%s", qPrintable(proxyId), deadline_, failCount, errorCode, errorMsg.c_str());
+        //if (failCount > 3) {
+        //    BfError("(%s)->OnPing fail too mang times,so kill it", qPrintable(proxyId));
+        //    QMetaObject::invokeMethod(g_sm->pushService(), "disconnectProxy", Qt::QueuedConnection, Q_ARG(QString, proxyId));
+        //}
         return;
     }
-    proxyClient_->resetPingFailCount();
+    client_->resetPingFailCount();
 }
 
 //
@@ -379,15 +256,15 @@ void PushService::init()
     QObject::connect(this->pingTimer_, &QTimer::timeout, this, &PushService::onPing);
     this->pingTimer_->start();
 
-    // ctpmgr...
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::tradeWillBegin, this, &PushService::onTradeWillBegin);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotContracts, this, &PushService::onGotContracts);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotTick, this, &PushService::onGotTick);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotOrder, this, &PushService::onGotOrder);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotTrade, this, &PushService::onGotTrade);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotPosition, this, &PushService::onGotPosition);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotAccount, this, &PushService::onGotAccount);
-    QObject::connect(g_sm->ctpMgr(), &CtpMgr::gotCtpError, this, &PushService::onCtpError);
+    // gatewaymgr...
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::tradeWillBegin, this, &PushService::onTradeWillBegin);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotContracts, this, &PushService::onGotContracts);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotTick, this, &PushService::onGotTick);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotOrder, this, &PushService::onGotOrder);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotTrade, this, &PushService::onGotTrade);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotPosition, this, &PushService::onGotPosition);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotAccount, this, &PushService::onGotAccount);
+    QObject::connect(g_sm->gatewayMgr(), &GatewayMgr::gotGatewayError, this, &PushService::onGatewayError);
     QObject::connect(g_sm->logger(), &Logger::gotError, this, &PushService::onLog);
     QObject::connect(g_sm->logger(), &Logger::gotInfo, this, &PushService::onLog);
 }
@@ -403,61 +280,61 @@ void PushService::shutdown()
     this->pingTimer_ = nullptr;
 
     // delete all proxyclient
-    for (auto proxy : proxyClients_) {
-        delete proxy;
+    for (auto client : clients_) {
+        delete client;
     }
-    proxyClients_.clear();
+    clients_.clear();
 }
 
-void PushService::onProxyConnect(const BfConnectReq& req)
+void PushService::connectProxy(QString gatewayId, const BfConnectReq& req)
 {
     BfDebug(__FUNCTION__);
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
     QString endpoint = QString().sprintf("%s:%d", req.clientip().c_str(), req.clientport());
-    QString clientId = req.clientid().c_str();
+    QString proxyId = req.clientid().c_str();
 
-    ProxyClient* proxyClient = new ProxyClient(grpc::CreateChannel(endpoint.toStdString(), grpc::InsecureChannelCredentials()),
-        clientId, req);
+    ProxyClient* client = new ProxyClient(grpc::CreateChannel(endpoint.toStdString(), grpc::InsecureChannelCredentials()),
+        gatewayId, req);
 
-    if (proxyClients_.contains(clientId)) {
-        auto it = proxyClients_[clientId];
+    if (clients_.contains(proxyId)) {
+        auto it = clients_[proxyId];
         delete it;
-        proxyClients_.remove(clientId);
+        clients_.remove(proxyId);
     }
-    proxyClients_[clientId] = proxyClient;
+    clients_[proxyId] = client;
 }
 
-void PushService::onProxyClose(QString clientId)
+void PushService::disconnectProxy(QString proxyId)
 {
     BfDebug(__FUNCTION__);
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    if (proxyClients_.contains(clientId)) {
-        BfDebug("delete proxyclient:%s", qPrintable(clientId));
-        ProxyClient* proxyClient = proxyClients_[clientId];
-        delete proxyClient;
-        proxyClients_.remove(clientId);
+    if (clients_.contains(proxyId)) {
+        BfDebug("delete proxyclient:%s", qPrintable(proxyId));
+        ProxyClient* client = clients_[proxyId];
+        delete client;
+        clients_.remove(proxyId);
     }
 }
 
-void PushService::onGatewayClose()
+void PushService::onGatewayClosed()
 {
     BfDebug(__FUNCTION__);
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    for (auto proxy : proxyClients_) {
-        delete proxy;
+    for (auto client : clients_) {
+        delete client;
     }
-    proxyClients_.clear();
+    clients_.clear();
 }
 
 void PushService::onGotOrder(const BfOrderData& data)
 {
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    for (auto proxy : proxyClients_) {
-        if (proxy->tradehandler()) {
-            proxy->OnOrder(data);
+    for (auto client : clients_) {
+        if (client->tradehandler()) {
+            client->OnOrder(data);
         }
     }
 };
@@ -466,9 +343,9 @@ void PushService::onGotTrade(const BfTradeData& data)
 {
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    for (auto proxy : proxyClients_) {
-        if (proxy->tradehandler()) {
-            proxy->OnTrade(data);
+    for (auto client : clients_) {
+        if (client->tradehandler()) {
+            client->OnTrade(data);
         }
     }
 }
@@ -483,14 +360,14 @@ void PushService::onGotTick(void* curTick, void* preTick)
     // tick里面的exchange不一定有=
     QString exchange = data.exchange().c_str();
     if (exchange.trimmed().length() == 0) {
-        void* contract = g_sm->ctpMgr()->getContract(data.symbol().c_str());
+        void* contract = g_sm->gatewayMgr()->getContract(data.symbol().c_str());
         exchange = CtpUtils::getExchangeFromContract(contract);
         data.set_exchange(exchange.toStdString());
     }
 
-    for (auto proxy : proxyClients_) {
-        if (proxy->tickHandler() && proxy->subscribled(data.symbol(), data.exchange())) {
-            proxy->OnTick(data);
+    for (auto client : clients_) {
+        if (client->tickHandler() && client->subscribled(data.symbol(), data.exchange())) {
+            client->OnTick(data);
         }
     }
 }
@@ -500,8 +377,8 @@ void PushService::onTradeWillBegin()
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
     BfVoid data;
-    for (auto proxy : proxyClients_) {
-        proxy->OnTradeWillBegin(data);
+    for (auto client : clients_) {
+        client->OnTradeWillBegin(data);
     }
 }
 
@@ -510,8 +387,8 @@ void PushService::onGotContracts(QStringList ids, QStringList idsAll)
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
     BfVoid data;
-    for (auto proxy : proxyClients_) {
-        proxy->OnGotContracts(data);
+    for (auto client : clients_) {
+        client->OnGotContracts(data);
     }
 }
 
@@ -519,9 +396,9 @@ void PushService::onGotPosition(const BfPositionData& data)
 {
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    for (auto proxy : proxyClients_) {
-        if (proxy->tradehandler()) {
-            proxy->OnPosition(data);
+    for (auto client : clients_) {
+        if (client->tradehandler()) {
+            client->OnPosition(data);
         }
     }
 }
@@ -533,9 +410,9 @@ void PushService::onLog(QString when, QString msg)
     BfLogData data;
     data.set_when(when.toStdString());
     data.set_message(msg.toStdString());
-    for (auto proxy : proxyClients_) {
-        if (proxy->logHandler()) {
-            proxy->OnLog(data);
+    for (auto client : clients_) {
+        if (client->logHandler()) {
+            client->OnLog(data);
         }
     }
 }
@@ -544,9 +421,9 @@ void PushService::onGotAccount(const BfAccountData& data)
 {
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    for (auto proxy : proxyClients_) {
-        if (proxy->tradehandler()) {
-            proxy->OnAccount(data);
+    for (auto client : clients_) {
+        if (client->tradehandler()) {
+            client->OnAccount(data);
         }
     }
 }
@@ -555,20 +432,14 @@ void PushService::onPing()
 {
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
-    //google::protobuf::Arena arena;
-    //BfPingData* data = google::protobuf::Arena::CreateMessage<BfPingData>(&arena);
-    //data->set_message("bftrader");
-    //for (auto proxy : proxyClients_) {
-    //    proxy->OnPing(*data);
-    //}
     BfPingData data;
-    data.set_message("bftrader");
-    for (auto proxy : proxyClients_) {
-        proxy->OnPing(data);
+    data.set_message("ctpgateway");
+    for (auto client : clients_) {
+        client->OnPing(data);
     }
 }
 
-void PushService::onCtpError(int code, QString msg, QString msgEx)
+void PushService::onGatewayError(int code, QString msg, QString msgEx)
 {
     g_sm->checkCurrentOn(ServiceMgr::PUSH);
 
@@ -576,9 +447,9 @@ void PushService::onCtpError(int code, QString msg, QString msgEx)
     data.set_code(code);
     data.set_message(msg.toStdString());
     data.set_messageex(msgEx.toStdString());
-    for (auto proxy : proxyClients_) {
-        if (proxy->logHandler()) {
-            proxy->OnError(data);
+    for (auto client : clients_) {
+        if (client->logHandler()) {
+            client->OnError(data);
         }
     }
 }

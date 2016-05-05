@@ -1,8 +1,8 @@
 #include "rpcservice.h"
 #include "bfgateway.grpc.pb.h"
-#include "ctp_utils.h"
-#include "ctpmgr.h"
+#include "ctputils.h"
 #include "encode_utils.h"
+#include "gatewaymgr.h"
 #include "pushservice.h"
 #include "servicemgr.h"
 #include <QThread>
@@ -18,7 +18,8 @@ using namespace bftrader::bfgateway;
 
 class Gateway final : public BfGatewayService::Service {
 public:
-    Gateway()
+    explicit Gateway(QString gatewayId)
+        : gatewayId_(gatewayId)
     {
         BfDebug("%s on thread:%d", __FUNCTION__, ::GetCurrentThreadId());
     }
@@ -31,7 +32,7 @@ public:
         BfDebug("%s on thread:%d", __FUNCTION__, ::GetCurrentThreadId());
 
         BfDebug("peer:%s,%s:%s:%d", context->peer().c_str(), request->clientid().c_str(), request->clientip().c_str(), request->clientport());
-        QMetaObject::invokeMethod(g_sm->pushService(), "onProxyConnect", Qt::QueuedConnection, Q_ARG(BfConnectReq, *request));
+        QMetaObject::invokeMethod(g_sm->pushService(), "connectProxy", Qt::QueuedConnection, Q_ARG(QString, gatewayId_), Q_ARG(BfConnectReq, *request));
 
         response->set_errorcode(0);
         return grpc::Status::OK;
@@ -40,6 +41,16 @@ public:
     {
         QString clientId = getClientId(context);
         response->set_message(request->message());
+        return grpc::Status::OK;
+    }
+    virtual ::grpc::Status Disconnect(::grpc::ServerContext* context, const ::bftrader::BfVoid* request, ::bftrader::BfVoid* response) override
+    {
+        BfDebug("%s on thread:%d", __FUNCTION__, ::GetCurrentThreadId());
+
+        QString clientId = getClientId(context);
+        BfDebug("clientId=%s", qPrintable(clientId));
+
+        QMetaObject::invokeMethod(g_sm->pushService(), "disconnectProxy", Qt::QueuedConnection, Q_ARG(QString, clientId));
         return grpc::Status::OK;
     }
     virtual ::grpc::Status GetContract(::grpc::ServerContext* context, const ::bftrader::BfGetContractReq* request, ::bftrader::BfContractData* response) override
@@ -52,13 +63,13 @@ public:
         int index = request->index();
         if (index <= 0) {
             QString symbol = request->symbol().c_str();
-            void* contract = g_sm->ctpMgr()->getContract(symbol);
+            void* contract = g_sm->gatewayMgr()->getContract(symbol);
             CtpUtils::translateContract(contract, response);
         } else {
-            QStringList ids = request->subscribled() ? g_sm->ctpMgr()->getIds() : g_sm->ctpMgr()->getIdsAll();
+            QStringList ids = request->subscribled() ? g_sm->gatewayMgr()->getIds() : g_sm->gatewayMgr()->getIdsAll();
             if (ids.length() > index - 1) {
                 QString symbol = ids.at(index - 1);
-                void* contract = g_sm->ctpMgr()->getContract(symbol);
+                void* contract = g_sm->gatewayMgr()->getContract(symbol);
                 CtpUtils::translateContract(contract, response);
             }
         }
@@ -72,10 +83,10 @@ public:
         QString clientId = getClientId(context);
         BfDebug("clientId=%s", qPrintable(clientId));
 
-        QString bfOrderId = g_sm->ctpMgr()->genOrderId();
+        QString bfOrderId = g_sm->gatewayMgr()->genOrderId();
         response->set_bforderid(bfOrderId.toStdString());
 
-        QMetaObject::invokeMethod(g_sm->ctpMgr(), "sendOrderWithId", Qt::QueuedConnection, Q_ARG(QString, bfOrderId), Q_ARG(BfSendOrderReq, *request));
+        QMetaObject::invokeMethod(g_sm->gatewayMgr(), "sendOrderWithId", Qt::QueuedConnection, Q_ARG(QString, bfOrderId), Q_ARG(BfSendOrderReq, *request));
         return grpc::Status::OK;
     }
     virtual ::grpc::Status CancelOrder(::grpc::ServerContext* context, const ::bftrader::BfCancelOrderReq* request, ::bftrader::BfVoid* response) override
@@ -85,7 +96,7 @@ public:
         QString clientId = getClientId(context);
         BfDebug("clientId=%s", qPrintable(clientId));
 
-        QMetaObject::invokeMethod(g_sm->ctpMgr(), "cancelOrder", Qt::QueuedConnection, Q_ARG(BfCancelOrderReq, *request));
+        QMetaObject::invokeMethod(g_sm->gatewayMgr(), "cancelOrder", Qt::QueuedConnection, Q_ARG(BfCancelOrderReq, *request));
         return grpc::Status::OK;
     }
     virtual ::grpc::Status QueryAccount(::grpc::ServerContext* context, const ::bftrader::BfVoid* request, ::bftrader::BfVoid* response) override
@@ -95,7 +106,7 @@ public:
         QString clientId = getClientId(context);
         BfDebug("clientId=%s", qPrintable(clientId));
 
-        QMetaObject::invokeMethod(g_sm->ctpMgr(), "queryAccount", Qt::QueuedConnection);
+        QMetaObject::invokeMethod(g_sm->gatewayMgr(), "queryAccount", Qt::QueuedConnection);
         return grpc::Status::OK;
     }
     virtual ::grpc::Status QueryPosition(::grpc::ServerContext* context, const ::bftrader::BfVoid* request, ::bftrader::BfVoid* response) override
@@ -105,17 +116,7 @@ public:
         QString clientId = getClientId(context);
         BfDebug("clientId=%s", qPrintable(clientId));
 
-        QMetaObject::invokeMethod(g_sm->ctpMgr(), "queryPosition", Qt::QueuedConnection);
-        return grpc::Status::OK;
-    }
-    virtual ::grpc::Status Close(::grpc::ServerContext* context, const ::bftrader::BfVoid* request, ::bftrader::BfVoid* response) override
-    {
-        BfDebug("%s on thread:%d", __FUNCTION__, ::GetCurrentThreadId());
-
-        QString clientId = getClientId(context);
-        BfDebug("clientId=%s", qPrintable(clientId));
-
-        QMetaObject::invokeMethod(g_sm->pushService(), "onProxyClose", Qt::QueuedConnection, Q_ARG(QString, clientId));
+        QMetaObject::invokeMethod(g_sm->gatewayMgr(), "queryPosition", Qt::QueuedConnection);
         return grpc::Status::OK;
     }
 
@@ -128,10 +129,13 @@ private:
             auto its = context->client_metadata().equal_range("clientid");
             auto it = its.first;
             clientId = grpc::string(it->second.begin(), it->second.end()).c_str();
-            BfDebug("metadata: clientid=%s", clientId.toStdString().c_str());
+            //BfDebug("metadata: clientid=%s", clientId.toStdString().c_str());
         }
         return clientId;
     }
+
+private:
+    QString gatewayId_;
 };
 
 //
@@ -183,19 +187,17 @@ void RpcService::stop()
         delete gatewayThread_;
         gatewayThread_ = nullptr;
 
-        QMetaObject::invokeMethod(g_sm->pushService(), "onGatewayClose", Qt::QueuedConnection);
+        QMetaObject::invokeMethod(g_sm->pushService(), "onGatewayClosed", Qt::QueuedConnection);
     }
 }
 
 void RpcService::onGatewayThreadStarted()
 {
     BfDebug(__FUNCTION__);
-    if (g_sm->isCurrentOn(ServiceMgr::RPC)) {
-        qFatal("g_sm->CurrentOn(ServiceMgr::RPC)");
-    }
+    g_sm->checkCurrentOn(ServiceMgr::EXTERNAL);
 
     std::string server_address("0.0.0.0:50051");
-    Gateway gateway;
+    Gateway gateway("ctpgateway");
 
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());

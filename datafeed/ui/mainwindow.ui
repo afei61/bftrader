@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>799</width>
-    <height>581</height>
+    <width>900</width>
+    <height>600</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -31,7 +31,16 @@
      <number>2</number>
     </property>
     <item>
-     <widget class="QTableWidget" name="tableWidget"/>
+     <widget class="QSplitter" name="splitter">
+      <property name="orientation">
+       <enum>Qt::Vertical</enum>
+      </property>
+      <property name="handleWidth">
+       <number>2</number>
+      </property>
+      <widget class="QTabWidget" name="tabWidgetData"/>
+      <widget class="QTabWidget" name="tabWidgetLog"/>
+     </widget>
     </item>
    </layout>
   </widget>
@@ -40,7 +49,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>799</width>
+     <width>900</width>
      <height>23</height>
     </rect>
    </property>
@@ -76,8 +85,7 @@
     <property name="title">
      <string>db</string>
     </property>
-    <addaction name="actionDbBrowser"/>
-    <addaction name="actionDbStat"/>
+    <addaction name="actionDbCompact"/>
    </widget>
    <widget class="QMenu" name="menuNet">
     <property name="title">
@@ -156,14 +164,9 @@
     <string>netStop</string>
    </property>
   </action>
-  <action name="actionDbBrowser">
+  <action name="actionDbCompact">
    <property name="text">
-    <string>dbBrowser</string>
-   </property>
-  </action>
-  <action name="actionDbStat">
-   <property name="text">
-    <string>dbStat</string>
+    <string>dbCompact</string>
    </property>
   </action>
  </widget>

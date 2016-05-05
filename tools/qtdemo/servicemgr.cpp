@@ -1,6 +1,6 @@
 #include "servicemgr.h"
-#include "ctpmgr.h"
 #include "dbservice.h"
+#include "gatewaymgr.h"
 #include "logger.h"
 #include "profile.h"
 #include "pushservice.h"
@@ -27,7 +27,7 @@ void ServiceMgr::init()
     const int threadCount = QThreadPool::globalInstance()->maxThreadCount();
     QThreadPool::globalInstance()->setMaxThreadCount(qMax(4, 2 * threadCount));
 
-    ui_thread_ = QThread::currentThread();
+    main_thread_ = QThread::currentThread();
     io_thread_ = new QThread;
     db_thread_ = new QThread;
     push_thread_ = new QThread;
@@ -36,8 +36,8 @@ void ServiceMgr::init()
 
     logger_ = new Logger;
     profile_ = new Profile;
-    ctpMgr_ = new CtpMgr;
-    ctpMgr_->moveToThread(logic_thread_);
+    gatewayMgr_ = new GatewayMgr;
+    gatewayMgr_->moveToThread(logic_thread_);
     dbService_ = new DbService;
     dbService_->moveToThread(db_thread_);
     rpcService_ = new RpcService;
@@ -88,7 +88,7 @@ void ServiceMgr::dbThreadFinished()
     checkCurrentOn(DB);
 
     dbService_->shutdown();
-    dbService_->moveToThread(ui_thread_);
+    dbService_->moveToThread(main_thread_);
 }
 
 void ServiceMgr::pushThreadStarted()
@@ -103,7 +103,7 @@ void ServiceMgr::pushThreadFinished()
     checkCurrentOn(PUSH);
 
     pushService_->shutdown();
-    pushService_->moveToThread(ui_thread_);
+    pushService_->moveToThread(main_thread_);
 }
 
 void ServiceMgr::rpcThreadStarted()
@@ -118,29 +118,29 @@ void ServiceMgr::rpcThreadFinished()
     checkCurrentOn(RPC);
 
     rpcService_->shutdown();
-    rpcService_->moveToThread(ui_thread_);
+    rpcService_->moveToThread(main_thread_);
 }
 
 void ServiceMgr::logicThreadStarted()
 {
     checkCurrentOn(LOGIC);
 
-    ctpMgr_->init();
+    gatewayMgr_->init();
 }
 
 void ServiceMgr::logicThreadFinished()
 {
     checkCurrentOn(LOGIC);
 
-    ctpMgr_->shutdown();
-    ctpMgr_->moveToThread(ui_thread_);
+    gatewayMgr_->shutdown();
+    gatewayMgr_->moveToThread(main_thread_);
 }
 
-CtpMgr* ServiceMgr::ctpMgr()
+GatewayMgr* ServiceMgr::gatewayMgr()
 {
     check();
 
-    return this->ctpMgr_;
+    return this->gatewayMgr_;
 }
 
 DbService* ServiceMgr::dbService()
@@ -210,15 +210,15 @@ void ServiceMgr::shutdown()
     delete dbService_;
     dbService_ = nullptr;
 
-    delete ctpMgr_;
-    ctpMgr_ = nullptr;
+    delete gatewayMgr_;
+    gatewayMgr_ = nullptr;
 
     delete profile_;
     profile_ = nullptr;
     delete logger_;
     logger_ = nullptr;
 
-    ui_thread_ = nullptr;
+    main_thread_ = nullptr;
 
     shutdown_ = true;
 }
@@ -248,8 +248,8 @@ QThread* ServiceMgr::getThread(ThreadType p)
 {
     check();
 
-    if (p == ServiceMgr::UI) {
-        return this->ui_thread_;
+    if (p == ServiceMgr::MAIN) {
+        return this->main_thread_;
     }
     if (p == ServiceMgr::IO) {
         return this->io_thread_;
@@ -276,7 +276,7 @@ bool ServiceMgr::isCurrentOn(ServiceMgr::ThreadType p)
     check();
 
     QThread* cur = QThread::currentThread();
-    if (p == ServiceMgr::UI && cur == ui_thread_) {
+    if (p == ServiceMgr::MAIN && cur == main_thread_) {
         return true;
     }
 
@@ -301,7 +301,7 @@ bool ServiceMgr::isCurrentOn(ServiceMgr::ThreadType p)
     }
 
     if (p == ServiceMgr::EXTERNAL) {
-        if (cur != ui_thread_ && cur != db_thread_
+        if (cur != main_thread_ && cur != db_thread_
             && cur != io_thread_ && cur != push_thread_
             && cur != rpc_thread_ && cur != logic_thread_) {
             return true;
@@ -362,5 +362,5 @@ void BfInfo(QString msg)
 
 void BfDebug(QString msg)
 {
-    g_sm->logger()->info(msg);
+    g_sm->logger()->debug(msg);
 }

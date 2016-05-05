@@ -5,7 +5,7 @@
 #include <QObject>
 #include <QTimer>
 
-#include "ctpmgr.h"
+#include "gatewaymgr.h"
 
 class ProxyClient;
 
@@ -20,14 +20,14 @@ public:
 signals:
 
 public slots:
-    void onProxyConnect(const BfConnectReq& req);
-    void onProxyClose(QString clientId);
-    void onGatewayClose();
+    void connectProxy(QString gatewayId, const BfConnectReq& req);
+    void disconnectProxy(QString proxyId);
+    void onGatewayClosed();
+    void onPing();
 
     void onTradeWillBegin();
     void onGotContracts(QStringList ids, QStringList idsAll);
-    void onPing();
-    void onCtpError(int code, QString msg, QString msgEx);
+    void onGatewayError(int code, QString msg, QString msgEx);
     void onLog(QString when, QString msg);
     void onGotTick(void* curTick, void* preTick);
     void onGotTrade(const BfTradeData& trade);
@@ -36,7 +36,7 @@ public slots:
     void onGotAccount(const BfAccountData& account);
 
 private:
-    QMap<QString, ProxyClient*> proxyClients_;
+    QMap<QString, ProxyClient*> clients_;
     QTimer* pingTimer_ = nullptr;
 };
 
